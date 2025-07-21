@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Eye, CheckCircle, Clock, Package } from "lucide-react"
+import { Loader2, Eye, CheckCircle, Calendar } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 interface Order {
@@ -21,16 +21,6 @@ interface Order {
   status: "pending" | "confirmed" | "preparing" | "shipped" | "delivered" | "cancelled"
   created_at: string
   delivery_address: string
-  payment_method: string
-  order_items: {
-    id: string
-    quantity: number
-    price: number
-    product: {
-      name_uz: string
-      unit: string
-    }
-  }[]
 }
 
 const statusColors = {
@@ -51,12 +41,11 @@ const statusLabels = {
   cancelled: "Bekor qilingan",
 }
 
-export default function OrdersPage() {
+export default function TodayOrdersPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
   const [orders, setOrders] = useState<Order[]>([])
   const [ordersLoading, setOrdersLoading] = useState(true)
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -66,33 +55,25 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (user) {
-      fetchOrders()
+      fetchTodayOrders()
     }
   }, [user])
 
-  const fetchOrders = async () => {
+  const fetchTodayOrders = async () => {
     try {
       setOrdersLoading(true)
+      const today = new Date().toISOString().split("T")[0]
+
       const { data, error } = await supabase
         .from("orders")
-        .select(`
-          *,
-          order_items (
-            id,
-            quantity,
-            price,
-            product:products (
-              name_uz,
-              unit
-            )
-          )
-        `)
+        .select("*")
+        .gte("created_at", today)
         .order("created_at", { ascending: false })
 
       if (error) throw error
       setOrders(data || [])
     } catch (error) {
-      console.error("Orders fetch error:", error)
+      console.error("Today orders fetch error:", error)
     } finally {
       setOrdersLoading(false)
     }
@@ -104,12 +85,7 @@ export default function OrdersPage() {
 
       if (error) throw error
 
-      // Update local state
       setOrders(orders.map((order) => (order.id === orderId ? { ...order, status: newStatus as any } : order)))
-
-      if (selectedOrder && selectedOrder.id === orderId) {
-        setSelectedOrder({ ...selectedOrder, status: newStatus as any })
-      }
     } catch (error) {
       console.error("Status update error:", error)
       alert("Status yangilashda xatolik")
@@ -120,11 +96,8 @@ export default function OrdersPage() {
     return new Intl.NumberFormat("uz-UZ").format(price)
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("uz-UZ", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString("uz-UZ", {
       hour: "2-digit",
       minute: "2-digit",
     })
@@ -152,17 +125,22 @@ export default function OrdersPage() {
         <Separator orientation="vertical" className="mr-2 h-4" />
         <div className="flex flex-1 items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold">Barcha buyurtmalar</h1>
-            <p className="text-sm text-muted-foreground">Buyurtmalarni boshqarish va kuzatish</p>
+            <h1 className="text-xl font-semibold flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Bugungi buyurtmalar
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {new Date().toLocaleDateString("uz-UZ", {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => router.push("/orders/today")}>
-              Bugungi
-            </Button>
-            <Button variant="outline" onClick={() => router.push("/orders/yesterday")}>
-              Kechagi
-            </Button>
-          </div>
+          <Button variant="outline" onClick={() => router.push("/orders")}>
+            Barcha buyurtmalar
+          </Button>
         </div>
       </header>
 
@@ -170,7 +148,7 @@ export default function OrdersPage() {
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Jami buyurtmalar</CardTitle>
+              <CardTitle className="text-sm font-medium">Bugungi jami</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{orders.length}</div>
@@ -178,7 +156,7 @@ export default function OrdersPage() {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Kutilayotgan</CardTitle>
+              <CardTitle className="text-sm font-medium">Yangi</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-yellow-600">
@@ -198,11 +176,14 @@ export default function OrdersPage() {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Yetkazilgan</CardTitle>
+              <CardTitle className="text-sm font-medium">Bugun daromad</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-green-600">
-                {orders.filter((o) => o.status === "delivered").length}
+                {formatPrice(
+                  orders.filter((o) => o.status === "delivered").reduce((sum, o) => sum + o.total_amount, 0),
+                )}{" "}
+                so'm
               </div>
             </CardContent>
           </Card>
@@ -210,8 +191,8 @@ export default function OrdersPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Buyurtmalar ro'yxati</CardTitle>
-            <CardDescription>Barcha buyurtmalarni ko'rish va boshqarish</CardDescription>
+            <CardTitle>Bugungi buyurtmalar ro'yxati</CardTitle>
+            <CardDescription>Bugun kelgan barcha buyurtmalar</CardDescription>
           </CardHeader>
           <CardContent>
             {ordersLoading ? (
@@ -220,26 +201,27 @@ export default function OrdersPage() {
               </div>
             ) : orders.length === 0 ? (
               <div className="text-center py-8">
-                <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">Hozircha buyurtmalar yo'q</p>
+                <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <p className="text-muted-foreground">Bugun hali buyurtmalar yo'q</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Vaqt</TableHead>
                       <TableHead>Buyurtma raqami</TableHead>
                       <TableHead>Mijoz</TableHead>
                       <TableHead>Summa</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Sana</TableHead>
                       <TableHead>Harakatlar</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {orders.map((order) => (
                       <TableRow key={order.id}>
-                        <TableCell className="font-medium">#{order.order_number}</TableCell>
+                        <TableCell className="font-medium">{formatTime(order.created_at)}</TableCell>
+                        <TableCell>#{order.order_number}</TableCell>
                         <TableCell>
                           <div>
                             <div className="font-medium">{order.customer_name}</div>
@@ -250,10 +232,9 @@ export default function OrdersPage() {
                         <TableCell>
                           <Badge className={statusColors[order.status]}>{statusLabels[order.status]}</Badge>
                         </TableCell>
-                        <TableCell>{formatDate(order.created_at)}</TableCell>
                         <TableCell>
                           <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setSelectedOrder(order)}>
+                            <Button variant="outline" size="sm" onClick={() => router.push(`/orders?id=${order.id}`)}>
                               <Eye className="h-4 w-4" />
                             </Button>
                             {order.status === "pending" && (
@@ -263,15 +244,6 @@ export default function OrdersPage() {
                                 onClick={() => updateOrderStatus(order.id, "confirmed")}
                               >
                                 <CheckCircle className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {order.status === "confirmed" && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => updateOrderStatus(order.id, "preparing")}
-                              >
-                                <Clock className="h-4 w-4" />
                               </Button>
                             )}
                           </div>
@@ -284,97 +256,6 @@ export default function OrdersPage() {
             )}
           </CardContent>
         </Card>
-
-        {selectedOrder && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Buyurtma tafsilotlari - #{selectedOrder.order_number}</CardTitle>
-              <CardDescription>{formatDate(selectedOrder.created_at)} da yaratilgan</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <h4 className="font-semibold mb-2">Mijoz ma'lumotlari</h4>
-                  <p>
-                    <strong>Ism:</strong> {selectedOrder.customer_name}
-                  </p>
-                  <p>
-                    <strong>Telefon:</strong> {selectedOrder.customer_phone}
-                  </p>
-                  <p>
-                    <strong>Manzil:</strong> {selectedOrder.delivery_address}
-                  </p>
-                  <p>
-                    <strong>To'lov usuli:</strong> {selectedOrder.payment_method}
-                  </p>
-                </div>
-                <div>
-                  <h4 className="font-semibold mb-2">Buyurtma ma'lumotlari</h4>
-                  <p>
-                    <strong>Status:</strong>
-                    <Badge className={`ml-2 ${statusColors[selectedOrder.status]}`}>
-                      {statusLabels[selectedOrder.status]}
-                    </Badge>
-                  </p>
-                  <p>
-                    <strong>Jami summa:</strong> {formatPrice(selectedOrder.total_amount)} so'm
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <h4 className="font-semibold mb-4">Buyurtma mahsulotlari</h4>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Mahsulot</TableHead>
-                      <TableHead>Miqdor</TableHead>
-                      <TableHead>Narx</TableHead>
-                      <TableHead>Jami</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedOrder.order_items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{item.product.name_uz}</TableCell>
-                        <TableCell>
-                          {item.quantity} {item.product.unit}
-                        </TableCell>
-                        <TableCell>{formatPrice(item.price)} so'm</TableCell>
-                        <TableCell>{formatPrice(item.price * item.quantity)} so'm</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="mt-6 flex gap-2">
-                <Button onClick={() => setSelectedOrder(null)} variant="outline">
-                  Yopish
-                </Button>
-                {selectedOrder.status === "pending" && (
-                  <>
-                    <Button onClick={() => updateOrderStatus(selectedOrder.id, "confirmed")}>Tasdiqlash</Button>
-                    <Button variant="destructive" onClick={() => updateOrderStatus(selectedOrder.id, "cancelled")}>
-                      Bekor qilish
-                    </Button>
-                  </>
-                )}
-                {selectedOrder.status === "confirmed" && (
-                  <Button onClick={() => updateOrderStatus(selectedOrder.id, "preparing")}>
-                    Tayyorlashni boshlash
-                  </Button>
-                )}
-                {selectedOrder.status === "preparing" && (
-                  <Button onClick={() => updateOrderStatus(selectedOrder.id, "shipped")}>Yuborish</Button>
-                )}
-                {selectedOrder.status === "shipped" && (
-                  <Button onClick={() => updateOrderStatus(selectedOrder.id, "delivered")}>Yetkazildi</Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   )

@@ -19,33 +19,64 @@ interface TelegramWebApp {
     chat_type?: string
     chat_instance?: string
     start_param?: string
+    auth_date?: number
+    hash?: string
   }
   version: string
   platform: string
   colorScheme: "light" | "dark"
-  themeParams: any
+  themeParams: {
+    link_color?: string
+    button_color?: string
+    button_text_color?: string
+    secondary_bg_color?: string
+    hint_color?: string
+    bg_color?: string
+    text_color?: string
+  }
   isExpanded: boolean
   viewportHeight: number
   viewportStableHeight: number
   headerColor: string
   backgroundColor: string
   isClosingConfirmationEnabled: boolean
+  isVerticalSwipesEnabled: boolean
   ready: () => void
   expand: () => void
   close: () => void
-  showAlert: (message: string) => void
-  showConfirm: (message: string, callback: (confirmed: boolean) => void) => void
-  showPopup: (params: any, callback?: (buttonId: string) => void) => void
+  showAlert: (message: string, callback?: () => void) => void
+  showConfirm: (message: string, callback?: (confirmed: boolean) => void) => void
+  showPopup: (
+    params: {
+      title?: string
+      message: string
+      buttons?: Array<{
+        id?: string
+        type?: "default" | "ok" | "close" | "cancel" | "destructive"
+        text: string
+      }>
+    },
+    callback?: (buttonId: string) => void,
+  ) => void
+  showScanQrPopup: (params: { text?: string }, callback?: (text: string) => void) => boolean
+  closeScanQrPopup: () => void
+  readTextFromClipboard: (callback?: (text: string) => void) => void
+  requestWriteAccess: (callback?: (granted: boolean) => void) => void
+  requestContact: (callback?: (granted: boolean, contact?: any) => void) => void
+  invokeCustomMethod: (method: string, params?: any, callback?: (error: string, result: any) => void) => void
+  onEvent: (eventType: string, eventHandler: () => void) => void
+  offEvent: (eventType: string, eventHandler: () => void) => void
+  sendData: (data: string) => void
+  switchInlineQuery: (query: string, choose_chat_types?: string[]) => void
+  openLink: (url: string, options?: { try_instant_view?: boolean }) => void
+  openTelegramLink: (url: string) => void
+  openInvoice: (url: string, callback?: (status: string) => void) => void
   setHeaderColor: (color: string) => void
   setBackgroundColor: (color: string) => void
   enableClosingConfirmation: () => void
   disableClosingConfirmation: () => void
-  onEvent: (eventType: string, eventHandler: () => void) => void
-  offEvent: (eventType: string, eventHandler: () => void) => void
-  sendData: (data: string) => void
-  openLink: (url: string) => void
-  openTelegramLink: (url: string) => void
-  openInvoice: (url: string, callback?: (status: string) => void) => void
+  enableVerticalSwipes: () => void
+  disableVerticalSwipes: () => void
 }
 
 interface TelegramContextType {
@@ -64,46 +95,55 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
   const [isTelegramWebApp, setIsTelegramWebApp] = useState(false)
 
   useEffect(() => {
-    // Check if we're in Telegram Web App environment
-    const checkTelegramWebApp = () => {
-      if (typeof window !== "undefined") {
-        // Check for Telegram WebApp
-        const tg = (window as any).Telegram?.WebApp
-        if (tg) {
-          console.log("Telegram WebApp detected")
-          setWebApp(tg)
-          setIsTelegramWebApp(true)
+    const initTelegram = () => {
+      if (typeof window !== "undefined" && window.Telegram?.WebApp) {
+        const tg = window.Telegram.WebApp
+        setWebApp(tg)
+        setIsTelegramWebApp(true)
 
-          // Initialize Telegram WebApp
-          tg.ready()
-          tg.expand()
+        // Initialize Telegram WebApp
+        tg.ready()
+        tg.expand()
 
-          // Set theme
-          tg.setHeaderColor("#000000")
-          tg.setBackgroundColor("#000000")
+        // Get user data
+        if (tg.initDataUnsafe?.user) {
+          setUser(tg.initDataUnsafe.user)
+        }
 
-          // Get user data
-          if (tg.initDataUnsafe?.user) {
-            console.log("Telegram user data:", tg.initDataUnsafe.user)
-            setUser(tg.initDataUnsafe.user)
-          }
+        console.log("Telegram WebApp initialized:", {
+          version: tg.version,
+          platform: tg.platform,
+          user: tg.initDataUnsafe?.user,
+        })
+      } else {
+        console.log("Not running in Telegram WebApp")
+        setIsTelegramWebApp(false)
+      }
+      setIsReady(true)
+    }
 
-          setIsReady(true)
-        } else {
-          console.log("Not in Telegram WebApp environment")
+    // Check if Telegram script is already loaded
+    if (window.Telegram?.WebApp) {
+      initTelegram()
+    } else {
+      // Wait for Telegram script to load
+      const checkTelegram = setInterval(() => {
+        if (window.Telegram?.WebApp) {
+          clearInterval(checkTelegram)
+          initTelegram()
+        }
+      }, 100)
+
+      // Fallback timeout
+      setTimeout(() => {
+        clearInterval(checkTelegram)
+        if (!window.Telegram?.WebApp) {
+          console.log("Telegram WebApp not available, continuing without it")
           setIsTelegramWebApp(false)
           setIsReady(true)
         }
-      }
+      }, 3000)
     }
-
-    // Check immediately
-    checkTelegramWebApp()
-
-    // Also check after a short delay in case the script loads later
-    const timeout = setTimeout(checkTelegramWebApp, 1000)
-
-    return () => clearTimeout(timeout)
   }, [])
 
   const value = {
@@ -122,4 +162,13 @@ export function useTelegram() {
     throw new Error("useTelegram must be used within a TelegramProvider")
   }
   return context
+}
+
+// Extend Window interface for TypeScript
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp: TelegramWebApp
+    }
+  }
 }

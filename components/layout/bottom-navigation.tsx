@@ -3,7 +3,7 @@
 import type React from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { Home, Grid3X3, Users, User, ShoppingBag } from "lucide-react"
+import { Home, ShoppingBag, Package } from "lucide-react"
 
 interface NavItem {
   id: string
@@ -14,10 +14,8 @@ interface NavItem {
 
 const navigationItems: NavItem[] = [
   { id: "home", label: "Bosh", icon: Home, path: "/" },
-  { id: "catalog", label: "Katalog", icon: Grid3X3, path: "/catalog" },
-  { id: "workers", label: "Ishchilar", icon: Users, path: "/workers" },
-  { id: "orders", label: "Buyurtma", icon: ShoppingBag, path: "/orders" },
-  { id: "profile", label: "Profil", icon: User, path: "/profile" },
+  { id: "orders", label: "Buyurtmalar", icon: ShoppingBag, path: "/orders" },
+  { id: "products", label: "Mahsulotlar", icon: Package, path: "/products" },
 ]
 
 export function BottomNavigation() {
@@ -27,7 +25,7 @@ export function BottomNavigation() {
     <nav className="fixed bottom-0 left-0 right-0 bg-background border-t border-border md:hidden z-40">
       <div className="flex items-center justify-around py-2 pb-safe">
         {navigationItems.map((item) => {
-          const isActive = pathname === item.path
+          const isActive = pathname === item.path || pathname.startsWith(item.path + "/")
           const Icon = item.icon
 
           return (

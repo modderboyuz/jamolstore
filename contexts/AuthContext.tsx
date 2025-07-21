@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useTelegram } from "./TelegramContext"
 
-interface UserProfile {
+interface AdminProfile {
   id: string
   telegram_id?: string
   first_name: string
@@ -21,29 +21,28 @@ interface UserProfile {
 }
 
 interface AuthContextType {
-  user: UserProfile | null
-  profile: UserProfile | null
+  user: AdminProfile | null
   loading: boolean
   signOut: () => void
-  checkWebsiteLoginStatus: (token: string) => Promise<UserProfile | null>
+  checkWebsiteLoginStatus: (token: string) => Promise<AdminProfile | null>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { user: tgUser, isReady, isTelegramWebApp } = useTelegram()
-  const [user, setUser] = useState<UserProfile | null>(null)
+  const [user, setUser] = useState<AdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (isReady) {
       if (isTelegramWebApp && tgUser) {
-        // Telegram Web App automatic login - no login required
-        console.log("Starting Telegram Web App auto login...")
+        // Telegram Web App automatic login - only for admins
+        console.log("Starting Telegram Web App admin login...")
         handleTelegramWebAppLogin()
       } else {
         // Regular web - check for login token or local session
-        console.log("Checking web session...")
+        console.log("Checking admin web session...")
         checkWebSession()
       }
     }
@@ -57,78 +56,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      console.log("Auto login for Telegram Web App user:", tgUser.id)
+      console.log("Auto login for Telegram Web App admin user:", tgUser.id)
 
-      // Find user by Telegram ID
+      // Find admin user by Telegram ID
       const { data: existingUser, error: searchError } = await supabase
         .from("users")
         .select("*")
         .eq("telegram_id", tgUser.id.toString())
+        .eq("role", "admin") // Only allow admin users
         .single()
 
       if (searchError && searchError.code !== "PGRST116") {
-        console.log("Search error handled:", searchError.message)
+        console.log("Admin search error handled:", searchError.message)
         setLoading(false)
         return
       }
 
-      let userData = existingUser
-
-      // If user doesn't exist, create new user automatically
       if (!existingUser) {
-        console.log("Creating new user for Telegram Web App ID:", tgUser.id)
-
-        const { data: newUser, error: createError } = await supabase
-          .from("users")
-          .insert([
-            {
-              telegram_id: tgUser.id.toString(),
-              first_name: tgUser.first_name,
-              last_name: tgUser.last_name || "",
-              username: tgUser.username || "",
-              is_verified: true,
-              role: "customer",
-            },
-          ])
-          .select()
-          .single()
-
-        if (createError) {
-          console.log("Create error handled:", createError.message)
-          setLoading(false)
-          return
-        }
-        userData = newUser
-        console.log("New user created successfully:", userData.id)
-      } else {
-        console.log("Existing user found, updating info...")
-
-        // Update existing user info
-        const { data: updatedUser, error: updateError } = await supabase
-          .from("users")
-          .update({
-            first_name: tgUser.first_name,
-            last_name: tgUser.last_name || "",
-            username: tgUser.username || "",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingUser.id)
-          .select()
-          .single()
-
-        if (updateError) {
-          console.log("Update error handled:", updateError.message)
-          userData = existingUser // Use existing data if update fails
-        } else {
-          userData = updatedUser
-        }
+        console.log("Admin user not found for Telegram ID:", tgUser.id)
+        setLoading(false)
+        return
       }
 
-      setUser(userData)
-      localStorage.setItem("jamolstroy_user", JSON.stringify(userData))
-      console.log("Telegram Web App auto login successful for:", userData.first_name)
+      // Update existing admin user info
+      const { data: updatedUser, error: updateError } = await supabase
+        .from("users")
+        .update({
+          first_name: tgUser.first_name,
+          last_name: tgUser.last_name || "",
+          username: tgUser.username || "",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingUser.id)
+        .select()
+        .single()
+
+      if (updateError) {
+        console.log("Admin update error handled:", updateError.message)
+        setUser(existingUser) // Use existing data if update fails
+      } else {
+        setUser(updatedUser)
+      }
+
+      localStorage.setItem("jamolstroy_admin", JSON.stringify(updatedUser || existingUser))
+      console.log("Telegram Web App admin login successful for:", existingUser.first_name)
     } catch (error) {
-      console.log("Telegram Web App login error handled:", error)
+      console.log("Telegram Web App admin login error handled:", error)
     } finally {
       setLoading(false)
     }
@@ -141,11 +114,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const loginToken = urlParams.get("token")
 
       if (loginToken) {
-        console.log("Login token found, checking status...")
+        console.log("Admin login token found, checking status...")
         const userData = await checkWebsiteLoginStatus(loginToken)
-        if (userData) {
+        if (userData && userData.role === "admin") {
           setUser(userData)
-          localStorage.setItem("jamolstroy_user", JSON.stringify(userData))
+          localStorage.setItem("jamolstroy_admin", JSON.stringify(userData))
           // Clean up URL
           window.history.replaceState({}, document.title, window.location.pathname)
           return
@@ -153,27 +126,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Check local storage
-      const savedUser = localStorage.getItem("jamolstroy_user")
+      const savedUser = localStorage.getItem("jamolstroy_admin")
       if (savedUser) {
         try {
           const parsedUser = JSON.parse(savedUser)
-          console.log("Local session found for:", parsedUser.first_name)
-          setUser(parsedUser)
+          if (parsedUser.role === "admin") {
+            console.log("Local admin session found for:", parsedUser.first_name)
+            setUser(parsedUser)
+          } else {
+            console.log("User is not admin, removing session")
+            localStorage.removeItem("jamolstroy_admin")
+          }
         } catch (parseError) {
-          console.error("Error parsing saved user:", parseError)
-          localStorage.removeItem("jamolstroy_user")
+          console.error("Error parsing saved admin user:", parseError)
+          localStorage.removeItem("jamolstroy_admin")
         }
       }
     } catch (error) {
-      console.error("Web session check error:", error)
+      console.error("Admin web session check error:", error)
     } finally {
       setLoading(false)
     }
   }
 
-  const checkWebsiteLoginStatus = async (token: string): Promise<UserProfile | null> => {
+  const checkWebsiteLoginStatus = async (token: string): Promise<AdminProfile | null> => {
     try {
-      console.log("Checking login status for token:", token)
+      console.log("Checking admin login status for token:", token)
 
       const { data: session, error: sessionError } = await supabase
         .from("website_login_sessions")
@@ -186,35 +164,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
 
       if (sessionError || !session) {
-        console.log("No approved session found")
+        console.log("No approved admin session found")
         return null
       }
 
       // Check if session is expired
       if (new Date(session.expires_at) < new Date()) {
-        console.log("Session expired")
+        console.log("Admin session expired")
         return null
       }
 
-      console.log("Login approved, user data:", session.user)
-      return session.user as UserProfile
+      // Check if user is admin
+      if (session.user.role !== "admin") {
+        console.log("User is not admin")
+        return null
+      }
+
+      console.log("Admin login approved, user data:", session.user)
+      return session.user as AdminProfile
     } catch (error) {
-      console.error("Login status check error:", error)
+      console.error("Admin login status check error:", error)
       return null
     }
   }
 
   const signOut = () => {
-    console.log("Signing out user")
+    console.log("Signing out admin user")
     setUser(null)
-    localStorage.removeItem("jamolstroy_user")
-    localStorage.removeItem("jamolstroy_cart")
+    localStorage.removeItem("jamolstroy_admin")
 
-    // Clear all jamolstroy related data
+    // Clear all jamolstroy admin related data
     const keysToRemove = []
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
-      if (key?.startsWith("jamolstroy_")) {
+      if (key?.startsWith("jamolstroy_admin")) {
         keysToRemove.push(key)
       }
     }
@@ -223,7 +206,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = {
     user,
-    profile: user, // For backward compatibility
     loading,
     signOut,
     checkWebsiteLoginStatus,
